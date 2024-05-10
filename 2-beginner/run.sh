@@ -1,3 +1,3 @@
-# Example ./run.sh helloworld.c
+# Example ./run.sh struct.c
 gcc $1 -lm
 ./a.out
