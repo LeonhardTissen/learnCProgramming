@@ -5,16 +5,20 @@
 
 // Define colors for the terminal
 #define KNRM "\x1B[0m"  // Reset color
+#define KGRE "\x1B[32m" // Green text
 #define BWHT "\x1B[47m" // White background
+#define BGRE "\x1B[42m" // Green background
+
+bool show_solution;
 
 enum Tile {
     Wall,
     Unpathed,
-    Traverser,
-    Exit,
-    Trail,
+    Solution,
     Branch,
 };
+
+int current_trail = Solution;
 
 enum Direction {
     Up,
@@ -38,6 +42,8 @@ Point createPoint(int x, int y) {
 Point createInvalidPoint() {
     return createPoint(-1, -1);
 }
+
+Point traverser;
 
 typedef struct {
     int **data; // 2D matrix of integers
@@ -103,9 +109,9 @@ void removeNonEdges(Field *field) {
 // Cuts out the border in the top left and bottom right for the start and exit
 void addStartAndExit(Field *field) {
     Point start = createPoint(1, 0);
-    changeTile(field->data, start, Trail);
+    changeTile(field->data, start, Solution);
     Point finish = createPoint(field->width - 2, field->height - 1);
-    changeTile(field->data, finish, Trail);
+    changeTile(field->data, finish, Solution);
 }
 
 // Add a wall at every 2nd tile both horizontally and vertically
@@ -119,11 +125,6 @@ void addGridPoints(Field *field) {
     }
 }
 
-void addInitialTraverser(Field *field) {
-    Point start_pos = createPoint(1, 1);
-    changeTile(field->data, start_pos, Traverser);
-}
-
 int getTile(Field field, Point position) {
     if (position.x < 0 ||
         position.y < 0 ||
@@ -134,34 +135,15 @@ int getTile(Field field, Point position) {
     return field.data[position.y][position.x];
 }
 
-const char *getDebugTileTexture(int tileId) {
-    switch (tileId) {
-        case Wall:
-            return "[]";
-        case Unpathed:
-            return "  ";
-        case Traverser:
-            return "hi";
-        case Trail:
-            return "- ";
-        case Branch:
-            return "..";
-        case Exit:
-            return "!!";
-        default:
-            return "??";
-    }
-}
-
 // Function to return the texture representation of a tileId
 const char *getTileTexture(int tileId) {
-    switch (tileId) {
-        case Wall:
-        case Unpathed:
-            return (BWHT "  " KNRM);
-        default:
-            return "  ";
+    if (tileId == Wall || tileId == Unpathed) {
+        return (BWHT "  " KNRM);
     }
+    if (show_solution && tileId == Solution) {
+        return (BGRE "  " KNRM);
+    }
+    return "  ";
 }
 
 // Function to render the field by printing its tile textures
@@ -220,31 +202,32 @@ Point movePoint(Point point, int direction, int distance) {
     return new_point;
 }
 
-Point getTraverser(Field field) {
-    return findTile(field, Traverser);
+void moveTraverserInDirection(Field *field, int direction, int trail) {
+    Point new_traverser_position = movePoint(traverser, direction, 1);
+    // Update the traverser position
+    traverser = new_traverser_position;
+
+    // Change tile to trail
+    changeTile(field->data, new_traverser_position, trail);
 }
 
-void moveTraverserInDirection(Field *field, int direction, int trail) {
-    Point traverser_position = getTraverser(*field);
-    Point new_traverser_position = movePoint(traverser_position, direction, 1);
+void moveTraverserInOtherDirection(Field *field, int direction, int trail) {
+    Point new_traverser_position = movePoint(traverser, direction, 1);
 
-    // Remove tile the traverser is on
-    changeTile(field->data, traverser_position, trail);
+    // Change tile to trail
+    changeTile(field->data, traverser, trail);
 
-    // Add the traverser back
-    changeTile(field->data, new_traverser_position, Traverser);
+    // Update the traverser position
+    traverser = new_traverser_position;
 }
 
 int getTileInTraverserDirection(Field field, int direction, int distance) {
-    Point traverser_position = getTraverser(field);
-    Point check_position = movePoint(traverser_position, direction, distance);
+    Point check_position = movePoint(traverser, direction, distance);
 
     return getTile(field, check_position);
 }
 
-void printTraverserPosition(Field *field) {
-    Point traverser = getTraverser(*field);
-
+void printTraverserPosition() {
     printf("Traverser is at x%d, y%d\n", traverser.x, traverser.y);
 }
 
@@ -253,16 +236,19 @@ int getRandomDirection() {
     return random % 4;
 }
 
+int getRandomRotationDirection() {
+    int random = rand();
+    return random % 2 == 0 ? 1 : -1;
+}
+
 bool canMoveTwice(Field *field, int direction) {
     int tile = getTileInTraverserDirection(*field, direction, 1);
 
-    if (tile != Unpathed)
-        return false;
+    if (tile != Unpathed) return false;
 
     int tile_after = getTileInTraverserDirection(*field, direction, 2);
 
-    if (tile_after != Unpathed)
-        return false;
+    if (tile_after != Unpathed) return false;
 
     return true;
 }
@@ -270,13 +256,14 @@ bool canMoveTwice(Field *field, int direction) {
 // Returns true if successfully moved in any direction
 bool traversalIteration(Field *field) {
     int random_direction = getRandomDirection();
+    int rotation_direction = getRandomRotationDirection();
     for (int rotation = 0; rotation <= 3; rotation++) {
-        int direction = (random_direction + rotation) % 4;
+        int direction = ((random_direction + rotation * rotation_direction) + 4) % 4;
 
         if (!canMoveTwice(field, direction)) continue;
 
-        moveTraverserInDirection(field, direction, Trail);
-        moveTraverserInDirection(field, direction, Trail);
+        moveTraverserInDirection(field, direction, current_trail);
+        moveTraverserInDirection(field, direction, current_trail);
         return true;
     }
     return false;
@@ -286,24 +273,24 @@ void traversalUndo(Field *field) {
     for (int direction = 0; direction <= 3; direction++) {
         int tile = getTileInTraverserDirection(*field, direction, 1);
 
-        if (tile != Trail) continue;
+        if (tile != Solution) continue;
 
-        moveTraverserInDirection(field, direction, Branch);
-        moveTraverserInDirection(field, direction, Branch);
+        moveTraverserInOtherDirection(field, direction, Branch);
+        moveTraverserInOtherDirection(field, direction, Branch);
     }
 }
 
 bool isTraverserAtExit(Field field) {
-    Point traverser_position = getTraverser(field);
-
-    return (traverser_position.x == field.width - 2 &&
-            traverser_position.y == field.height - 2);
+    return (traverser.x == field.width - 2 &&
+            traverser.y == field.height - 2);
 }
 
 void removeTraverser(Field *field) {
-    Point traverser_position = getTraverser(*field);
-
-    changeTile(field->data, traverser_position, Trail);
+    if (getTile(*field, traverser) != Solution) {
+        changeTile(field->data, traverser, Branch);
+    }
+    traverser.x = -1;
+    traverser.y = -1;
 }
 
 void traverseField(Field *field) {
@@ -330,9 +317,9 @@ void lookForPotentialBranches(Field *field) {
 
             int tile = getTile(*field, check_position);
 
-            if (tile != Trail && tile != Branch) continue;
+            if (tile != Solution && tile != Branch) continue;
 
-            changeTile(field->data, check_position, Traverser);
+            traverser = check_position;
 
             traverseFieldWithoutUndo(field);
         }
@@ -343,27 +330,51 @@ int main() {
     // Seed the random number generator
     srand(time(NULL));
 
-    printf("Maze Generator!\n\n");
-    int rows, cols;
+    // Start the timer to measure the time taken
+    float start_time = (float)clock() / CLOCKS_PER_SEC;
 
-    // Ask user for row and column count
+
+    printf(KGRE "Maze Generator!\n\n" KNRM);
+
+
+    // Ask user for row and column count and whether to show the solution or not
+    int rows, cols;
     printf("Enter amount of rows: ");
     scanf("%d", &rows);
     printf("Enter amount of columns: ");
     scanf("%d", &cols);
+    printf("Show solution? [y/n]: ");
+    char show_solution_input;
+    scanf(" %c", &show_solution_input);
+    show_solution = show_solution_input == 'y';
 
+    // Generate the field
     Field field = generateField(rows, cols);
 
     removeNonEdges(&field);
     addGridPoints(&field);
-    addInitialTraverser(&field);
 
+    // Set the starting point
+    changeTile(field.data, createPoint(1, 1), Solution);
+    traverser = createPoint(1, 1);
+
+    // Path out a solution
     traverseField(&field);
+
+    // Branch out from the solution where possible
+    current_trail = Branch;
     lookForPotentialBranches(&field);
 
     addStartAndExit(&field);
 
+    // Calculate the time taken
+    float end_time = (float)clock() / CLOCKS_PER_SEC;
+
+    // Render the field to the terminal
     renderField(field);
+
+    // Print the time taken
+    printf("Time taken: %f seconds\n", end_time - start_time);
 
     // Free the allocated emory for the Field
     freeField(field);
