@@ -4,8 +4,8 @@
 #include <stdbool.h>
 
 // Define colors for the terminal
-#define KNRM  "\x1B[0m"
-#define BWHT  "\x1B[47m"
+#define KNRM "\x1B[0m"  // Reset color
+#define BWHT "\x1B[47m" // White background
 
 enum Tile {
     Wall,
@@ -13,8 +13,7 @@ enum Tile {
     Traverser,
     Exit,
     Trail,
-    Herring,
-    Unknown
+    Branch,
 };
 
 enum Direction {
@@ -23,12 +22,6 @@ enum Direction {
     Down,
     Left
 };
-
-typedef struct {
-    int** data;
-    int width;
-    int height;
-} Field;
 
 typedef struct {
     int x;
@@ -46,6 +39,12 @@ Point createInvalidPoint() {
     return createPoint(-1, -1);
 }
 
+typedef struct {
+    int **data; // 2D matrix of integers
+    int width;
+    int height;
+} Field;
+
 // Function to generate a Field struct with a 2D matrix of integers
 Field generateField(int rows, int cols) {
     Field field;
@@ -53,7 +52,7 @@ Field generateField(int rows, int cols) {
     field.height = rows * 2 + 1;
 
     // Allocate memory for array of pointers to int (rows)
-    field.data = (int**)malloc(field.height * sizeof(int*));
+    field.data = (int **)malloc(field.height * sizeof(int *));
     if (field.data == NULL) {
         fprintf(stderr, "Memory allocation failed.\n");
         exit(EXIT_FAILURE);
@@ -61,7 +60,7 @@ Field generateField(int rows, int cols) {
 
     // Allocate memory for each row (array of integers)
     for (int y = 0; y < field.height; y++) {
-        field.data[y] = (int*)malloc(field.width * sizeof(int));
+        field.data[y] = (int *)malloc(field.width * sizeof(int));
         if (field.data[y] == NULL) {
             fprintf(stderr, "Memory allocation failed.\n");
 
@@ -75,6 +74,7 @@ Field generateField(int rows, int cols) {
         }
 
         for (int x = 0; x < field.width; x++) {
+            // Initialize all tiles to be walls
             field.data[y][x] = Wall;
         }
     }
@@ -83,7 +83,7 @@ Field generateField(int rows, int cols) {
 }
 
 // Function to change the tileId at a given position in a matrix
-void changeTile(int** data, Point point, int tileId) {
+void changeTile(int **data, Point point, int tileId) {
     data[point.y][point.x] = tileId;
 }
 
@@ -92,22 +92,21 @@ void removeNonEdges(Field *field) {
     for (int y = 0; y < field->height; y++) {
         for (int x = 0; x < field->width; x++) {
             if (y == 0 || y == field->height - 1 || x == 0 || x == field->width - 1) {
-                // Keep the edges (do nothing)
-            } else {
-                // Change non-edge tiles to Unpathed
-                changeTile(field->data, createPoint(x, y), Unpathed);
+                continue; // Skip edge tiles
             }
+            // Change non-edge tiles to Unpathed
+            changeTile(field->data, createPoint(x, y), Unpathed);
         }
     }
 }
 
+// Cuts out the border in the top left and bottom right for the start and exit
 void addStartAndExit(Field *field) {
     Point start = createPoint(1, 0);
     changeTile(field->data, start, Trail);
     Point finish = createPoint(field->width - 2, field->height - 1);
     changeTile(field->data, finish, Trail);
 }
-
 
 // Add a wall at every 2nd tile both horizontally and vertically
 void addGridPoints(Field *field) {
@@ -120,7 +119,7 @@ void addGridPoints(Field *field) {
     }
 }
 
-void addTraverser(Field *field) {
+void addInitialTraverser(Field *field) {
     Point start_pos = createPoint(1, 1);
     changeTile(field->data, start_pos, Traverser);
 }
@@ -135,9 +134,8 @@ int getTile(Field field, Point position) {
     return field.data[position.y][position.x];
 }
 
-// Function to return the texture representation of a tileId
-const char* getTileTexture(int tileId) {
-    /*switch(tileId) {
+const char *getDebugTileTexture(int tileId) {
+    switch (tileId) {
         case Wall:
             return "[]";
         case Unpathed:
@@ -146,19 +144,23 @@ const char* getTileTexture(int tileId) {
             return "hi";
         case Trail:
             return "- ";
-        case Herring:
+        case Branch:
             return "..";
         case Exit:
             return "!!";
         default:
             return "??";
-    }*/
+    }
+}
+
+// Function to return the texture representation of a tileId
+const char *getTileTexture(int tileId) {
     switch (tileId) {
         case Wall:
         case Unpathed:
-            return (BWHT "  ");
+            return (BWHT "  " KNRM);
         default:
-            return (KNRM "  ");
+            return "  ";
     }
 }
 
@@ -167,7 +169,7 @@ void renderField(Field field) {
     for (int y = 0; y < field.height; y++) {
         for (int x = 0; x < field.width; x++) {
             int tile = getTile(field, createPoint(x, y));
-            const char* tileTexture = getTileTexture(tile);
+            const char *tileTexture = getTileTexture(tile);
             printf("%s", tileTexture);
         }
         printf("\n");
@@ -254,11 +256,13 @@ int getRandomDirection() {
 bool canMoveTwice(Field *field, int direction) {
     int tile = getTileInTraverserDirection(*field, direction, 1);
 
-    if (tile != Unpathed) return false;
+    if (tile != Unpathed)
+        return false;
 
     int tile_after = getTileInTraverserDirection(*field, direction, 2);
 
-    if (tile_after != Unpathed) return false;
+    if (tile_after != Unpathed)
+        return false;
 
     return true;
 }
@@ -266,7 +270,7 @@ bool canMoveTwice(Field *field, int direction) {
 // Returns true if successfully moved in any direction
 bool traversalIteration(Field *field) {
     int random_direction = getRandomDirection();
-    for (int rotation = 0; rotation <= 3; rotation ++) {
+    for (int rotation = 0; rotation <= 3; rotation++) {
         int direction = (random_direction + rotation) % 4;
 
         if (!canMoveTwice(field, direction)) continue;
@@ -279,13 +283,13 @@ bool traversalIteration(Field *field) {
 }
 
 void traversalUndo(Field *field) {
-    for (int direction = 0; direction <= 3; direction ++) {
+    for (int direction = 0; direction <= 3; direction++) {
         int tile = getTileInTraverserDirection(*field, direction, 1);
 
         if (tile != Trail) continue;
 
-        moveTraverserInDirection(field, direction, Herring);
-        moveTraverserInDirection(field, direction, Herring);
+        moveTraverserInDirection(field, direction, Branch);
+        moveTraverserInDirection(field, direction, Branch);
     }
 }
 
@@ -314,7 +318,7 @@ void traverseField(Field *field) {
 }
 
 void traverseFieldWithoutUndo(Field *field) {
-    while(traversalIteration(field)) {};
+    while (traversalIteration(field)) {};
 
     removeTraverser(field);
 }
@@ -326,32 +330,33 @@ void lookForPotentialBranches(Field *field) {
 
             int tile = getTile(*field, check_position);
 
-            if (tile != Trail && tile != Herring) continue;
+            if (tile != Trail && tile != Branch) continue;
 
             changeTile(field->data, check_position, Traverser);
 
             traverseFieldWithoutUndo(field);
-        }   
+        }
     }
 }
 
 int main() {
-    // Randomize seed
+    // Seed the random number generator
     srand(time(NULL));
 
     printf("Maze Generator!\n\n");
     int rows, cols;
-    
-	printf("Enter rows: ");
-	scanf("%d", &rows);
-    printf("Enter columns: ");
-	scanf("%d", &cols);
+
+    // Ask user for row and column count
+    printf("Enter amount of rows: ");
+    scanf("%d", &rows);
+    printf("Enter amount of columns: ");
+    scanf("%d", &cols);
 
     Field field = generateField(rows, cols);
 
     removeNonEdges(&field);
     addGridPoints(&field);
-    addTraverser(&field);
+    addInitialTraverser(&field);
 
     traverseField(&field);
     lookForPotentialBranches(&field);
@@ -359,7 +364,7 @@ int main() {
     addStartAndExit(&field);
 
     renderField(field);
-    
+
     // Free the allocated emory for the Field
     freeField(field);
 }
