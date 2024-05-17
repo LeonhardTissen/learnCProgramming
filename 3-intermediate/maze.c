@@ -80,8 +80,11 @@ Field generateField(int rows, int cols) {
         }
 
         for (int x = 0; x < field.width; x++) {
-            // Initialize all tiles to be walls
-            field.data[y][x] = Wall;
+            if (y == 0 || y == field.height - 1 || x == 0 || x == field.width - 1) {
+                field.data[y][x] = Wall;
+            } else {
+                field.data[y][x] = Unpathed;
+            }
         }
     }
 
@@ -91,19 +94,6 @@ Field generateField(int rows, int cols) {
 // Function to change the tileId at a given position in a matrix
 void changeTile(int **data, Point point, int tileId) {
     data[point.y][point.x] = tileId;
-}
-
-// Function to clean out anything in a field except for the edges
-void removeNonEdges(Field *field) {
-    for (int y = 0; y < field->height; y++) {
-        for (int x = 0; x < field->width; x++) {
-            if (y == 0 || y == field->height - 1 || x == 0 || x == field->width - 1) {
-                continue; // Skip edge tiles
-            }
-            // Change non-edge tiles to Unpathed
-            changeTile(field->data, createPoint(x, y), Unpathed);
-        }
-    }
 }
 
 // Cuts out the border in the top left and bottom right for the start and exit
@@ -351,7 +341,6 @@ int main() {
     // Generate the field
     Field field = generateField(rows, cols);
 
-    removeNonEdges(&field);
     addGridPoints(&field);
 
     // Set the starting point
